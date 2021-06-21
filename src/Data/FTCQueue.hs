@@ -15,4 +15,4 @@ data KleisliQueue m a b
     = KleisliQueue !Int (Kleisli m a b) !Int (KleisliReverse m a b)
 
 check :: KleisliQueue m a b -> KleisliQueue m a b
-check (KleisliQueue lenf f lenr r) = _
+check (KleisliQueue lenf f lenr r) = undefined

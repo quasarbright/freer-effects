@@ -14,7 +14,7 @@ module Data.OpenUnion where
 import Data.Kind (Constraint)
 data Union (ts :: [* -> *]) a where
     UNow :: t a -> Union (t ': ts) a
-    UNext :: Union (t ': ts) a -> Union (any ': t ': ts) a
+    UNext :: Union ts a -> Union (any ': ts) a
 
 data Nat = Z | S Nat
 
@@ -68,7 +68,7 @@ instance (Traversable t, Traversable (Union ts)) => Traversable (Union (t ': ts)
     traverse f (UNow t) = UNow <$> traverse f t
     traverse f (UNext u) = UNext <$> traverse f u
 
-weaken :: Union (t ': ts) a -> Union (any ': t ': ts) a
+weaken :: Union ts a -> Union (t ': ts) a
 weaken = UNext
 
 decompose :: Union (t ': ts) a -> Either (Union ts a) (t a)
@@ -77,6 +77,7 @@ decompose (UNext u) = Left u
 
 extract :: Union '[t] a -> t a
 extract (UNow t) = t
+extract (UNext u) = done u
 
 done :: Union '[] a -> b
 done u = case u of
@@ -86,3 +87,13 @@ type Functors (ts :: [* -> *]) = Functor (Union ts)
 type family Members (ts :: [* -> *]) (r :: [* -> *]) :: Constraint where
     Members '[t] r = Member t r
     Members (t ': ts) r = (Member t r, Members ts r)
+
+-- | Polymorphic raising
+class Raise (r :: [* -> *]) (r' :: [* -> *]) where
+    weaken' :: Union r x -> Union r' x
+
+instance Raise r r where
+    weaken' = id
+
+instance (Raise r r') => Raise r (f ': r') where
+    weaken' = weaken . weaken'
