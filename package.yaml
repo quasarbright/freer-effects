@@ -1,0 +1,43 @@
+name:                freer-effects
+version:             0.1.0.0
+github:              "quasarbright/freer-effects"
+license:             BSD3
+author:              "Mike Delmonaco"
+maintainer:          "mdelmonacochs@gmail.com"
+copyright:           "Mike Delmonaco"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/quasarbright/freer-effects#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+
+ghc-options:
+- -W -Wall
+
+library:
+  source-dirs: src
+  ghc-options:
+  - -W -Wall
+
+tests:
+  freer-effects-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -W -Wall
+    dependencies:
+    - freer-effects
