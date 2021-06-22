@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TupleSections #-}
 module Data.FTCQueue
     ( FTCQueue()
     , tsingleton
@@ -15,65 +16,68 @@ import Control.Arrow
 import Data.Tuple (swap)
 
 -- | Queue head. Push onto here for post-composition
-data Head arr a b where
-    Empty :: Head arr a a
-    Push :: arr b c -> Head arr a b -> Head arr a c
+data Head m a b where
+    Empty :: Head m a a
+    Push :: (b -> m c) -> Head m a b -> Head m a c
 
 -- | Queue tail. Pop from here to extract the function that must be executed first. Cons for pre-composition
-data Tail arr a b where
-    Singleton :: arr a b -> Tail arr a b
-    Cons :: arr a b -> Tail arr b c -> Tail arr a c
+data Tail m a b where
+    Singleton :: (a -> m b) -> Tail m a b
+    Cons :: (a -> m b) -> Tail m b c -> Tail m a c
 
 -- | Convert head to tail in `O(n)` time. Uses a strict left fold, so shouldn't have a space leak
-headToTail :: Head arr a b -> Tail arr a b
+headToTail :: Head m a b -> Tail m a b
 headToTail (Push k h) = headToTailHelp h (Singleton k)
 headToTail Empty = error "cannot convert empty head to tail"
 
 -- | Helper for `headToTail` for accumulating. Made it a standalone because there was inference trouble
-headToTailHelp :: Head arr a b -> Tail arr b c -> Tail arr a c
+headToTailHelp :: Head m a b -> Tail m b c -> Tail m a c
 headToTailHelp Empty acc = acc
 headToTailHelp (Push k h) acc = headToTailHelp h $! Cons k acc
 
 -- | Append/compose two tails. `O(n)` time where `n` is the length of the left tail
 infixr `appendTail`
-appendTail :: Tail arr a b -> Tail arr b c -> Tail arr a c
+appendTail :: Tail m a b -> Tail m b c -> Tail m a c
 appendTail (Singleton k) t = Cons k t
 appendTail (Cons k t) t' = Cons k (appendTail t t')
 
-data FTCQueue arr a b where
-    FTCQueue :: !Int -> Head arr b c -> !Int -> Tail arr a b -> FTCQueue arr a c
+data FTCQueue m a b where
+    FTCQueue :: !Int -> Head m b c -> !Int -> Tail m a b -> FTCQueue m a c
 
 -- | If the head is larger than the tail, shift the whole head onto the tail. Ensures amortized constant time access
-check :: FTCQueue arr a b -> FTCQueue arr a b
+check :: FTCQueue m a b -> FTCQueue m a b
 check q@(FTCQueue lenh h lent t)
     | lenh > lent = FTCQueue 0 Empty (lenh + lent) (appendTail t (headToTail h))
     | otherwise = q
 
-instance Category arr => Category (Head arr) where
-    id = Push id Empty
+instance Monad m => Category (Head m) where
+    id = Push return Empty
     Empty . h = h
     Push k h . h' = Push k (h . h')
 
-instance Arrow arr => Arrow (Head arr) where
-    arr f = Push (arr f) Empty
-    first Empty = Empty
-    first (Push k h) = Push (first k) (first h)
+first' :: Functor f => (t1 -> f t2) -> (t1, t3) -> f (t2, t3)
+first' k (a,c) = (,c) <$> k a
 
-instance Category arr => Category (Tail arr) where
-    id = Singleton id
+instance Monad m => Arrow (Head m) where
+    arr f = Push (return . f) Empty
+    first Empty = Empty
+    first (Push k h) = Push (first' k) (first h)
+
+instance Monad m => Category (Tail m) where
+    id = Singleton return
     (.) = flip appendTail
 
-instance Arrow arr => Arrow (Tail arr) where
-    arr = Singleton . arr
-    first (Singleton k) = Singleton (first k)
-    first (Cons k t) = Cons (first k) (first t)
+instance Monad m => Arrow (Tail m) where
+    arr = Singleton . (return .)
+    first (Singleton k) = Singleton (first' k)
+    first (Cons k t) = Cons (first' k) (first t)
 
-instance Category arr => Category (FTCQueue arr) where
-    id = tsingleton id
+instance Monad m => Category (FTCQueue m) where
+    id = tsingleton return
     (.) = flip append
 
-instance Arrow arr => Arrow (FTCQueue arr) where
-    arr f = tsingleton (arr f)
+instance Monad m => Arrow (FTCQueue m) where
+    arr f = tsingleton (return . f)
     first (FTCQueue lenh h lent t) = FTCQueue lenh (first h) lent (first t)
     f *** g = first f |><| arr swap |><| first g |><| arr swap
 
@@ -84,34 +88,35 @@ instance Arrow arr => Arrow (FTCQueue arr) where
 
 
 -- | lift a single function into the queue
-tsingleton :: arr a b -> FTCQueue arr a b
+tsingleton :: (a -> m b) -> FTCQueue m a b
 tsingleton k = FTCQueue 0 Empty 1 (Singleton k)
 
 -- | Add a function to the queue (post-composition)
 infixr |>
-(|>) :: FTCQueue arr a x -> arr x b -> FTCQueue arr a b
+(|>) :: FTCQueue m a x -> (x -> m b) -> FTCQueue m a b
 FTCQueue lenh h lent t |> k = check $ FTCQueue (succ lenh) (Push k h) lent t
 
 -- | Alias for `(|>)`
-postCompose :: FTCQueue arr a x -> arr x b -> FTCQueue arr a b
+postCompose :: FTCQueue m a x -> (x -> m b) -> FTCQueue m a b
 postCompose = (|>)
 
 -- | Compose/append two queues
 infixr |><|
-(|><|) :: FTCQueue arr a x -> FTCQueue arr x b -> FTCQueue arr a b
+(|><|) :: FTCQueue m a x -> FTCQueue m x b -> FTCQueue m a b
 FTCQueue lenh h lent t |><| FTCQueue lenh' h' lent' t' = FTCQueue lenh h' (lent + lenh' + lent') (t `appendTail` headToTail h `appendTail` t')
 
 -- | Alias for `(|><|)`
-append :: FTCQueue arr a x -> FTCQueue arr x b -> FTCQueue arr a b
+append :: FTCQueue m a x -> FTCQueue m x b -> FTCQueue m a b
 append = (|><|)
 
 -- | Data structure representing the result of a "pop" from the queue
-data ViewL arr a b where
-    TOne :: arr a b -> ViewL arr a b
-    (:|) :: arr a x -> FTCQueue arr x b -> ViewL arr a b
+data ViewL m a b where
+    TOne :: (a -> m b) -> ViewL m a b
+    (:|) :: (a -> m x) -> FTCQueue m x b -> ViewL m a b
 
 -- | "Pop" the function which needs to be executed first
-tviewl :: FTCQueue arr a b -> ViewL arr a b
+tviewl :: FTCQueue m a b -> ViewL m a b
 tviewl (FTCQueue _ Empty _ (Singleton k)) = TOne k
 tviewl (FTCQueue _ Push{} _ Singleton{}) = error "called tviewl on a malformed queue"
 tviewl (FTCQueue lenh h lent (Cons k t)) = k :| FTCQueue lenh h (pred lent) t
+
