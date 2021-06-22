@@ -10,6 +10,7 @@ module Control.Monad.Eff
     , interpret'
     , reinterpret
     , rewrite
+    , run
     , raise
     , raise'
     , Member()
@@ -18,7 +19,7 @@ module Control.Monad.Eff
 
 import Prelude hiding (id, (.))
 import Data.OpenUnion
-    ( weaken, decompose, Raise(..), Member(inj), Members() )
+    ( weaken, decompose, Raise(..), Member(inj), Members(), done )
 import Data.FTCQueue
     ( ViewL((:|), TOne), tsingleton, (|><|), tviewl )
 import Control.Category ( Category((.), id) )
@@ -68,6 +69,10 @@ rewrite _ (Pure a) = Pure a
 rewrite f (Bind u k) = case decompose u of
     Left u' -> Bind (weaken u') (k `qComp` rewrite f)
     Right fx -> Bind (inj (f fx)) (k `qComp` rewrite f)
+
+run :: Eff '[] a -> a
+run (Pure a) = a
+run (Bind u _) = done u
 
 -- | Add a possible effect to the row of effects
 raise :: Eff r a -> Eff (f ': r) a

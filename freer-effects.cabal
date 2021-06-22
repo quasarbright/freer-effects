@@ -26,6 +26,9 @@ source-repository head
 library
   exposed-modules:
       Control.Monad.Eff
+      Control.Monad.Eff.Internal
+      Control.Monad.Eff.Reader
+      Control.Monad.Eff.State
       Data.FTCQueue
       Data.OpenUnion
       Lib
