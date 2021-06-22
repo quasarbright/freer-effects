@@ -3,18 +3,29 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Control.Monad.Eff where
+module Control.Monad.Eff
+    ( Eff()
+    , liftEff
+    , interpret
+    , interpret'
+    , reinterpret
+    , rewrite
+    , raise
+    , raise'
+    , Member()
+    , Members()
+    ) where
 
 import Prelude hiding (id, (.))
 import Data.OpenUnion
-    ( weaken, decompose, Raise(..), Member(inj), Union )
+    ( weaken, decompose, Raise(..), Member(inj), Union, Members() )
 import Data.FTCQueue
     ( (|>), FTCQueue, ViewL((:|), TOne), tsingleton, (|><|), tviewl )
 import Control.Category ( Category((.), id) )
 
-type Arr r a b = a -> Eff r b
 type Arrs r a b = FTCQueue (Eff r) a b
 
+-- | An extensible effect monad parametrized by effects @r@ and return type @a@
 data Eff r a where
     Pure :: a -> Eff r a
     Bind :: Union r x -> Arrs r x a -> Eff r a
@@ -35,11 +46,13 @@ instance Monad (Eff r) where
     Pure a >>= k = k a
     Bind m k >>= k' = Bind m (k |> k')
 
+-- | Apply a kleisli queue as a function
 qApp :: Arrs r a b -> a -> Eff r b
 qApp q a = case tviewl q of
     TOne f -> f a
     f :| q' -> bind' (f a) q'
 
+-- | Bind a kleisli queue as if it was a single kleisli
 bind' :: Eff r a -> Arrs r a b -> Eff r b
 bind' (Pure a) k = qApp k a
 bind' (Bind m k) k' = Bind m (k |><| k')
@@ -49,27 +62,29 @@ bind' (Bind m k) k' = Bind m (k |><| k')
 qComp :: Arrs r a b -> (Eff r b -> Eff r' c) -> Arrs r' a c
 qComp q f = tsingleton (f . qApp q)
 
+-- | Lifts a raw effect into the monad
 liftEff :: Member f r => f x -> Eff r x
 liftEff f = Bind (inj f) id
 
+-- | Tool for writing simple interpreters with a handler that extracts an effect's value
 interpret :: (forall x . f x -> x) -> Eff (f ': r) a -> Eff r a
-interpret _ (Pure a) = Pure a
-interpret f (Bind u k) = case decompose u of
-    Left u' -> Bind u' (k `qComp` interpret f)
-    Right fx -> interpret f (k `qApp` f fx)
+interpret handler = interpret' pure (\fx k -> k (handler fx))
 
+-- | Tool for writing more general interpreters. Must supply an analog for return and bind. Also functions as a polymorphic `reinterpret` if you constrain @r@
 interpret' :: (a -> Eff r b) -> (forall x . f x -> (x -> Eff r b) -> Eff r b) -> Eff (f ': r) a -> Eff r b
 interpret' ret _ (Pure a) = ret a
 interpret' ret bind (Bind u k) = case decompose u of
     Left u' -> Bind u' (k `qComp` interpret' ret bind)
     Right f -> bind f (interpret' ret bind . qApp k)
 
+-- | Tool for writing interpreters which convert the top effect type into another effect type deeper in the stack
 reinterpret :: Member f' r => (forall x . f x -> f' x) -> Eff (f ': r) a -> Eff r a
 reinterpret _ (Pure a) = Pure a
 reinterpret f (Bind u k) = case decompose u of
     Left u' -> Bind u' (k `qComp` reinterpret f)
     Right fx -> Bind (inj (f fx)) (k `qComp` reinterpret f)
 
+-- | Tool for writing interpreters which converts the top effect type to another effect type on the top of the stack
 rewrite :: forall f f' r a . (forall x . f x -> f' x) -> Eff (f ': r) a -> Eff (f' ': r) a
 rewrite _ (Pure a) = Pure a
 rewrite f (Bind u k) = case decompose u of

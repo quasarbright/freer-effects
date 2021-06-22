@@ -12,7 +12,7 @@ module Data.FTCQueue
 
 import Prelude hiding (reverse, id, (.))
 import Control.Category ( Category(..) )
-import Control.Arrow
+import Control.Arrow ( Arrow((***), first, arr) )
 import Data.Tuple (swap)
 
 -- | Queue head. Push onto here for post-composition
